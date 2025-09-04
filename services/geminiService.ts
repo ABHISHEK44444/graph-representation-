@@ -13,29 +13,56 @@ const ai = new GoogleGenAI({ apiKey: API_KEY });
 const model = 'gemini-2.5-flash';
 
 const promptTemplate = `
-You are an expert data analyst. A user has provided you with the text content extracted from a document. Your task is to analyze this content, find the primary dataset suitable for visualization, and convert it into a structured JSON format. The data could be in tables (represented as CSV), lists, or paragraphs. Focus on quantifiable information.
+You are an expert data analysis engine. Your task is to convert raw text from a document into a specific JSON format for charting.
 
-The output must be a JSON object with three keys:
-1.  "chartData": An array of objects, where each object represents a data point (e.g., a row in a table). Ensure all numerical values are converted to numbers, not strings.
-2.  "nameKey": A string representing the key in "chartData" objects that should be used for labels (e.g., the x-axis in a bar chart). This should be a categorical or time-based field.
-3.  "dataKeys": An array of strings, where each string is a key in "chartData" objects that corresponds to a numerical value to be plotted.
+**CRITICAL JSON OUTPUT RULES:**
+Your entire response must be a single JSON object with the following keys: \`chartData\`, \`nameKey\`, and \`dataKeys\`.
 
-Example: If the document text contains sales figures, the output should be similar to this:
+1.  **\`nameKey\` (string): The primary categorical key for the chart's X-axis.**
+    *   **PRIORITY 1 (Best):** Find the column that contains the most detailed textual descriptions (e.g., "Product Name", "Task Description", "Details"). This should be your first choice for \`nameKey\`.
+    *   **PRIORITY 2 (Fallback):** If no highly descriptive column exists, use a general categorical or time-based column (e.g., "Month", "Year", "Category"). This is an acceptable fallback.
+    *   **INVALID:** Do not use a column with purely numerical data (e.g., "Sales", "Price") or unique identifiers as the \`nameKey\`.
+
+2.  **\`dataKeys\` (array of strings): The numerical keys for the chart's Y-axis.**
+    *   This MUST be an array of keys that point to columns containing ONLY NUMERICAL data.
+    *   The \`nameKey\` cannot be included in \`dataKeys\`.
+
+3.  **\`chartData\` (array of objects): The raw data.**
+    *   Each object in the array represents a row from the source data.
+    *   Values corresponding to keys listed in \`dataKeys\` MUST be converted to numbers (e.g., remove currency symbols like '$', commas, and parse "1,234.50" as 1234.5).
+
+**EXAMPLE 1: DESCRIPTIVE DATA**
+Source Data Columns: \`Details | Month | Cost\`
+Correct JSON Output:
 {
   "chartData": [
-    { "month": "January", "sales": 1200, "expenses": 800 },
-    { "month": "February", "sales": 1500, "expenses": 900 }
+    { "Details": "SSD replacement", "Month": "Jan", "Cost": 250 },
+    { "Details": "BIOS reset", "Month": "Jan", "Cost": 50 }
   ],
-  "nameKey": "month",
-  "dataKeys": ["sales", "expenses"]
+  "nameKey": "Details",
+  "dataKeys": ["Cost"]
 }
+*Explanation: "Details" is the best descriptive column (Priority 1), so it becomes the \`nameKey\`. "Cost" is numerical, so it goes into \`dataKeys\`. "Month" is just other data.*
 
-Here is the document content:
+**EXAMPLE 2: TIME-SERIES DATA**
+Source Data Columns: \`Month | Sales\`
+Correct JSON Output:
+{
+  "chartData": [
+    { "Month": "Jan", "Sales": 5000 },
+    { "Month": "Feb", "Sales": 7500 }
+  ],
+  "nameKey": "Month",
+  "dataKeys": ["Sales"]
+}
+*Explanation: No descriptive column exists, so the time-based "Month" column is used as the fallback \`nameKey\` (Priority 2).*
+
+Now, analyze the following document text and produce the JSON. If no chartable data is found, return \`{"chartData": [], "nameKey": "", "dataKeys": []}\`.
 ---
 {DOCUMENT_CONTENT}
 ---
 
-Now, analyze the text and provide the JSON output. If no usable data is found, return an empty structure like {"chartData": [], "nameKey": "", "dataKeys": []}.
+Provide only the JSON object as a response.
 `;
 
 export const extractDataFromDocument = async (textContent: string): Promise<ChartDataResponse> => {
@@ -69,17 +96,42 @@ export const extractDataFromDocument = async (textContent: string): Promise<Char
 
         const parsedData = JSON.parse(jsonString);
 
-        // Sanitize data: Ensure numeric values are numbers, handling potential formatting like commas.
-        if (parsedData.chartData && Array.isArray(parsedData.chartData) && parsedData.dataKeys) {
+        // Validate, filter, and sanitize the data from the AI to prevent non-numeric keys in the metric selector.
+        if (parsedData.chartData && Array.isArray(parsedData.chartData) && parsedData.dataKeys && Array.isArray(parsedData.dataKeys) && parsedData.chartData.length > 0) {
+            // Filter dataKeys to ensure they only point to columns that are entirely numeric.
+            const validDataKeys = parsedData.dataKeys.filter((key: string) => {
+                // A key is valid if it's not the nameKey and ALL of its values are numeric.
+                return key !== parsedData.nameKey && parsedData.chartData.every((row: any) => {
+                    const value = row[key];
+                    if (value === undefined || value === null || value === '') return true; // Allow sparse data
+                    if (typeof value === 'number') return true;
+                    if (typeof value === 'string') {
+                        const cleanedValue = value.replace(/[\$,]/g, ''); // Handle dollar signs and commas
+                        // Check if it's a valid finite number
+                        return !isNaN(parseFloat(cleanedValue)) && isFinite(Number(cleanedValue));
+                    }
+                    return false; // Reject keys with non-numeric values (e.g., objects, booleans).
+                });
+            });
+
+            parsedData.dataKeys = validDataKeys;
+            
+            // Sanitize the chartData: ensure all values for the valid dataKeys are numbers.
             parsedData.chartData = parsedData.chartData.map((row: any) => {
                 const newRow = { ...row };
-                parsedData.dataKeys.forEach((key: string) => {
-                     if (newRow[key] !== undefined && typeof newRow[key] === 'string') {
-                        // Remove commas before parsing to handle formatted numbers
-                        const num = parseFloat(newRow[key].replace(/,/g, ''));
-                        if (!isNaN(num)) {
-                            newRow[key] = num;
-                        }
+                validDataKeys.forEach((key: string) => {
+                    const value = newRow[key];
+                    if (value !== undefined && value !== null && value !== '') {
+                         if (typeof value === 'string') {
+                            const num = parseFloat(value.replace(/[\$,]/g, '')); // Handle dollar signs and commas
+                            newRow[key] = isNaN(num) ? null : num;
+                         } else if (typeof value !== 'number') {
+                            // If it's not a string or number (e.g. boolean), nullify it for safety.
+                            newRow[key] = null;
+                         }
+                    } else {
+                        // Standardize all forms of "empty" to null for charting libraries.
+                        newRow[key] = null;
                     }
                 });
                 return newRow;
