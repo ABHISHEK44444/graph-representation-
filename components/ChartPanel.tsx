@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, Cell, LabelList, ComposedChart } from 'recharts';
 import type { ChartDataResponse } from '../types';
@@ -143,37 +144,57 @@ const TabButton: React.FC<{
 
 const DataKeySelector: React.FC<{ dataKeys: string[], selectedKey: string, onSelect: (key: string) => void }> = ({ dataKeys, selectedKey, onSelect }) => {
     return (
-        <div className="relative">
-            <label htmlFor="metric-select" className="sr-only">Select metric</label>
-            <select
-                id="metric-select"
-                value={selectedKey}
-                onChange={(e) => onSelect(e.target.value)}
-                className="bg-white border border-gray-300 text-gray-700 text-sm rounded-md pl-3 pr-8 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 block w-full appearance-none transition"
-            >
-                {dataKeys.map(key => (
-                    <option key={key} value={key} className="bg-white">
-                        {key.charAt(0).toUpperCase() + key.slice(1)}
-                    </option>
-                ))}
-            </select>
-             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
-                <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+        <div className="flex items-center gap-2">
+            <label htmlFor="metric-select" className="text-sm font-medium text-gray-600 shrink-0">View Metric:</label>
+            <div className="relative">
+                <select
+                    id="metric-select"
+                    value={selectedKey}
+                    onChange={(e) => onSelect(e.target.value)}
+                    className="bg-white border border-gray-300 text-gray-700 text-sm rounded-md pl-3 pr-8 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 block w-full appearance-none transition"
+                >
+                    {dataKeys.map(key => (
+                        <option key={key} value={key} className="bg-white">
+                            {key.charAt(0).toUpperCase() + key.slice(1)}
+                        </option>
+                    ))}
+                </select>
+                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                </div>
             </div>
         </div>
     );
 };
 
 
-const BarChartView: React.FC<{ data: ChartDataResponse }> = ({ data }) => {
+const BarChartView: React.FC<{ data: ChartDataResponse, fileName: string, isFilterable?: boolean }> = ({ data, fileName, isFilterable = false }) => {
     const { chartData, nameKey, dataKeys } = data;
     const [barDataKey, setBarDataKey] = useState<string>(dataKeys[0] || '');
+    const [nameKeyFilter, setNameKeyFilter] = useState<string>('All');
 
     useEffect(() => {
         if (!dataKeys.includes(barDataKey)) {
             setBarDataKey(dataKeys[0] || '');
         }
     }, [dataKeys, barDataKey]);
+
+    const filterOptions = useMemo(() => {
+        if (!isFilterable || !chartData || !nameKey) return [];
+        const uniqueNames = [...new Set(chartData.map(item => item[nameKey] as string))];
+        return ['All', ...uniqueNames];
+    }, [isFilterable, chartData, nameKey]);
+
+    const filteredChartData = useMemo(() => {
+        if (!isFilterable || nameKeyFilter === 'All') {
+            return chartData;
+        }
+        return chartData.filter(item => item[nameKey] === nameKeyFilter);
+    }, [isFilterable, nameKeyFilter, chartData, nameKey]);
+    
+    const chartTitle = barDataKey && nameKey
+        ? `${barDataKey.charAt(0).toUpperCase() + barDataKey.slice(1)} by ${nameKey.charAt(0).toUpperCase() + nameKey.slice(1)}`
+        : `Chart for ${fileName}`;
 
     const barDefs = useMemo(() => (
         <defs>
@@ -195,25 +216,54 @@ const BarChartView: React.FC<{ data: ChartDataResponse }> = ({ data }) => {
 
     return (
         <div className="flex flex-col gap-4 h-full">
-            {dataKeys.length > 1 && (
-                <div className="flex justify-end">
-                    <DataKeySelector
-                        dataKeys={dataKeys}
-                        selectedKey={barDataKey}
-                        onSelect={setBarDataKey}
-                    />
+            <div className="flex justify-between items-center flex-wrap gap-2 min-h-[36px]">
+                <h3 className="text-lg font-semibold text-gray-800" title={chartTitle}>
+                    {chartTitle}
+                </h3>
+                <div className="flex items-center gap-4">
+                    {isFilterable && filterOptions.length > 2 && (
+                        <div className="flex items-center gap-2">
+                            <label htmlFor="filter-select" className="text-sm font-medium text-gray-600 shrink-0">
+                                Filter by {nameKey}:
+                            </label>
+                            <div className="relative">
+                                <select
+                                    id="filter-select"
+                                    value={nameKeyFilter}
+                                    onChange={(e) => setNameKeyFilter(e.target.value)}
+                                    className="bg-white border border-gray-300 text-gray-700 text-sm rounded-md pl-3 pr-8 py-1.5 focus:ring-indigo-500 focus:border-indigo-500 block w-full appearance-none transition"
+                                >
+                                    {filterOptions.map(option => (
+                                        <option key={option} value={option}>
+                                            {option}
+                                        </option>
+                                    ))}
+                                </select>
+                                 <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-gray-400">
+                                    <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20"><path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/></svg>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    {dataKeys.length > 1 && (
+                        <DataKeySelector
+                            dataKeys={dataKeys}
+                            selectedKey={barDataKey}
+                            onSelect={setBarDataKey}
+                        />
+                    )}
                 </div>
-            )}
+            </div>
             <div className="flex-grow h-96 md:h-[500px]">
                 <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={chartData} margin={{ top: 30, right: 10, left: 0, bottom: 20 }}>
+                    <ComposedChart data={filteredChartData} margin={{ top: 30, right: 10, left: 0, bottom: 20 }}>
                         {barDefs}
                         <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
                         <XAxis dataKey={nameKey} stroke="#6b7280" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                         <YAxis stroke="#6b7280" tick={{ fontSize: 12 }} axisLine={false} tickLine={false} />
                         <Tooltip content={<CustomCartesianTooltip />} cursor={{ fill: 'rgba(239, 246, 255, 0.6)' }} />
                         <Bar dataKey={barDataKey} shape={<CylindricalBar />} barSize={100}>
-                            {chartData.map((_entry, index) => (
+                            {filteredChartData.map((_entry, index) => (
                                 <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                             ))}
                             <LabelList
@@ -239,33 +289,36 @@ const BarChartView: React.FC<{ data: ChartDataResponse }> = ({ data }) => {
     );
 };
 
-const TableView: React.FC<{ data: ChartDataResponse }> = ({ data }) => {
+const TableView: React.FC<{ data: ChartDataResponse; fileName: string }> = ({ data, fileName }) => {
     const { chartData, nameKey, dataKeys } = data;
     const headers = [nameKey, ...dataKeys];
     return (
-        <div className="w-full rounded-lg border border-gray-200 overflow-hidden">
-            <table className="w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
-                    <tr>
-                        {headers.map(header => (
-                            <th key={header} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                                {header.charAt(0).toUpperCase() + header.slice(1)}
-                            </th>
-                        ))}
-                    </tr>
-                </thead>
-                <tbody className="bg-white divide-y divide-gray-200">
-                    {chartData.map((row, rowIndex) => (
-                        <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
+        <div className="flex flex-col gap-4">
+            <h3 className="text-lg font-semibold text-gray-800">Raw Data from {fileName}</h3>
+            <div className="w-full rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                        <tr>
                             {headers.map(header => (
-                                <td key={`${rowIndex}-${header}`} className="px-6 py-4 text-sm text-gray-700 break-words">
-                                    {typeof row[header] === 'number' ? (row[header] as number).toLocaleString() : row[header]}
-                                </td>
+                                <th key={header} scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    {header.charAt(0).toUpperCase() + header.slice(1)}
+                                </th>
                             ))}
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                        {chartData.map((row, rowIndex) => (
+                            <tr key={rowIndex} className="hover:bg-gray-50 transition-colors">
+                                {headers.map(header => (
+                                    <td key={`${rowIndex}-${header}`} className="px-6 py-4 text-sm text-gray-700 break-words">
+                                        {typeof row[header] === 'number' ? (row[header] as number).toLocaleString() : row[header]}
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 };
@@ -283,10 +336,10 @@ export const ChartPanel: React.FC<ChartPanelProps> = ({ dataSets, fileNames, onR
 
     const renderContent = () => {
         switch (activeTab) {
-            case 'chart1': return <BarChartView data={dataSets[0]} />;
-            case 'chart2': return <BarChartView data={dataSets[1]} />;
-            case 'table1': return <TableView data={dataSets[0]} />;
-            case 'table2': return <TableView data={dataSets[1]} />;
+            case 'chart1': return <BarChartView data={dataSets[0]} fileName={fileNames[0]} />;
+            case 'chart2': return <BarChartView data={dataSets[1]} fileName={fileNames[1]} isFilterable={true} />;
+            case 'table1': return <TableView data={dataSets[0]} fileName={fileNames[0]} />;
+            case 'table2': return <TableView data={dataSets[1]} fileName={fileNames[1]} />;
             default: return null;
         }
     };
